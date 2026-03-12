@@ -1,6 +1,35 @@
-version: "3"
+#!/bin/bash
+
+# Exit on error
+set -e
+
+echo "Creating folder structure..."
+# Centralized data folders and config directory
+sudo mkdir -p /data/{books,audiobooks,music,movies,series,photos,documents,obsidian}
+sudo mkdir -p /opt/homeserver/config/{jellyfin,navidrome,audiobookshelf,kavita,immich,postgres,calibre-web}
+
+# Set ownership to the current user
+sudo chown -R $USER:$USER /data
+sudo chown -R $USER:$USER /opt/homeserver
+
+echo "Installing Docker and Dependencies..."
+sudo apt update
+sudo apt install -y docker.io docker-compose-plugin samba
+
+# Ensure Docker starts on boot
+sudo systemctl enable docker
+sudo systemctl start docker
+
+# Add user to docker group (Note: effect takes place after logout or 'newgrp docker')
+sudo usermod -aG docker $USER
+
+echo "Creating docker-compose stack..."
+
+cat <<EOF > /opt/homeserver/docker-compose.yml
+version: "3.8"
 
 services:
+  # Media Server (Movies/TV)
   jellyfin:
     image: jellyfin/jellyfin:latest
     container_name: jellyfin
@@ -11,6 +40,7 @@ services:
       - /opt/homeserver/config/jellyfin:/config
     restart: unless-stopped
 
+  # Music Streaming
   navidrome:
     image: deluan/navidrome:latest
     container_name: navidrome
@@ -19,12 +49,12 @@ services:
     environment:
       ND_SCANSCHEDULE: 1h
       ND_LOGLEVEL: info
-      ND_BASEURL: ""
     volumes:
       - /data/music:/music
       - /opt/homeserver/config/navidrome:/data
     restart: unless-stopped
 
+  # Audiobooks and E-books
   audiobookshelf:
     image: ghcr.io/advplyr/audiobookshelf:latest
     container_name: audiobookshelf
@@ -32,12 +62,12 @@ services:
       - "13378:80"
     volumes:
       - /data/audiobooks:/audiobooks
-      - /data/books:/books # You can manage e-books here too
+      - /data/books:/books
       - /opt/homeserver/config/audiobookshelf:/config
       - /opt/homeserver/metadata:/metadata
     restart: unless-stopped
 
-  # Better for technical PDFs and general E-pub management
+  # General E-book Management (PDFs/Epubs)
   calibre-web:
     image: lscr.io/linuxserver/calibre-web:latest
     container_name: calibre-web
@@ -52,13 +82,12 @@ services:
       - "8083:8083"
     restart: unless-stopped
 
-  # If you still want a Photo Gallery for LAN use:
+  # Photo Gallery
   immich-server:
     image: ghcr.io/immich-app/immich-server:release
     container_name: immich-server
     volumes:
       - /data/photos:/usr/src/app/upload
-    env_file: [] # Explicitly empty to avoid errors
     environment:
       - DB_HOSTNAME=immich-db
       - DB_USERNAME=postgres
@@ -87,3 +116,35 @@ services:
     image: redis:6.2-alpine
     container_name: immich-redis
     restart: unless-stopped
+
+EOF
+
+echo "Starting services..."
+cd /opt/homeserver
+# Using sudo here ensures it runs even if the group change hasn't refreshed
+sudo docker compose up -d
+
+echo "Configuring Samba for LAN access..."
+
+# Append Samba configuration
+sudo bash -c 'cat >> /etc/samba/smb.conf <<EOL
+
+[HomeData]
+   path = /data
+   browseable = yes
+   read only = no
+   guest ok = yes
+   force user = '$USER'
+EOL'
+
+sudo systemctl restart smbd
+
+echo "-------------------------------------------------------"
+echo "Setup complete! Access your services via your local IP:"
+echo "Jellyfin (Movies):       http://SERVER_IP:8096"
+echo "Navidrome (Music):       http://SERVER_IP:4533"
+echo "Audiobookshelf:          http://SERVER_IP:13378"
+echo "Calibre-Web (Books):     http://SERVER_IP:8083"
+echo "Immich (Photos):         http://SERVER_IP:2283"
+echo "Samba Share:             \\\\SERVER_IP\\HomeData"
+echo "-------------------------------------------------------"
