@@ -6,21 +6,33 @@ set -e
 echo "Creating folder structure..."
 # Centralized data folders and config directory
 sudo mkdir -p /data/{books,audiobooks,music,movies,series,photos,documents,obsidian}
-sudo mkdir -p /opt/homeserver/config/{jellyfin,navidrome,audiobookshelf,kavita,immich,postgres,calibre-web}
+sudo mkdir -p /opt/homeserver/config/{jellyfin,navidrome,audiobookshelf,postgres,calibre-web,immich}
 
 # Set ownership to the current user
 sudo chown -R $USER:$USER /data
 sudo chown -R $USER:$USER /opt/homeserver
 
-echo "Installing Docker and Dependencies..."
+echo "Setting up official Docker repository..."
 sudo apt update
-sudo apt install -y docker.io docker-compose-plugin samba
+sudo apt install -y ca-certificates curl gnupg
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+echo "Installing Docker, Compose Plugin, and Samba..."
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin samba
 
 # Ensure Docker starts on boot
 sudo systemctl enable docker
 sudo systemctl start docker
 
-# Add user to docker group (Note: effect takes place after logout or 'newgrp docker')
+# Add user to docker group
 sudo usermod -aG docker $USER
 
 echo "Creating docker-compose stack..."
@@ -121,7 +133,7 @@ EOF
 
 echo "Starting services..."
 cd /opt/homeserver
-# Using sudo here ensures it runs even if the group change hasn't refreshed
+# Use sudo to avoid permission issues immediately after usermod
 sudo docker compose up -d
 
 echo "Configuring Samba for LAN access..."
@@ -141,10 +153,10 @@ sudo systemctl restart smbd
 
 echo "-------------------------------------------------------"
 echo "Setup complete! Access your services via your local IP:"
-echo "Jellyfin (Movies):       http://SERVER_IP:8096"
-echo "Navidrome (Music):       http://SERVER_IP:4533"
-echo "Audiobookshelf:          http://SERVER_IP:13378"
-echo "Calibre-Web (Books):     http://SERVER_IP:8083"
-echo "Immich (Photos):         http://SERVER_IP:2283"
-echo "Samba Share:             \\\\SERVER_IP\\HomeData"
+echo "Jellyfin:             http://SERVER_IP:8096"
+echo "Navidrome:            http://SERVER_IP:4533"
+echo "Audiobookshelf:       http://SERVER_IP:13378"
+echo "Calibre-Web:          http://SERVER_IP:8083"
+echo "Immich:               http://SERVER_IP:2283"
+echo "Samba Share:          \\\\SERVER_IP\\HomeData"
 echo "-------------------------------------------------------"
